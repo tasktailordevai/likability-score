@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Likability Score | Political Perception Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">📊</div>
+                <h1>Likability<span>Score</span></h1>
+            </div>
+            
+            <div class="api-status">
+                <h3>Data Sources</h3>
+                <div class="status-item" id="status-openai">
+                    <span class="status-dot"></span>
+                    <span>OpenAI</span>
+                </div>
+                <div class="status-item" id="status-newsapi">
+                    <span class="status-dot"></span>
+                    <span>NewsAPI</span>
+                </div>
+                <div class="status-item" id="status-reddit">
+                    <span class="status-dot"></span>
+                    <span>Reddit</span>
+                </div>
+                <div class="status-item" id="status-rss">
+                    <span class="status-dot"></span>
+                    <span>Google RSS</span>
+                </div>
+            </div>
+            
+            <div class="quick-actions">
+                <h3>Quick Actions</h3>
+                <button class="quick-btn" onclick="sendQuickMessage('How is Narendra Modi doing?')">
+                    🎯 Analyze Modi
+                </button>
+                <button class="quick-btn" onclick="sendQuickMessage('Compare Modi and Rahul Gandhi')">
+                    ⚔️ Modi vs Rahul
+                </button>
+                <button class="quick-btn" onclick="sendQuickMessage('Who is more popular - Kejriwal or Yogi?')">
+                    📈 Kejriwal vs Yogi
+                </button>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button class="clear-btn" onclick="clearChat()">
+                    🗑️ Clear Chat
+                </button>
+                <p class="version">POC v1.0</p>
+            </div>
+        </aside>
+        
+        <!-- Main Chat Area -->
+        <main class="chat-container">
+            <div class="chat-header">
+                <h2>Political Perception Analyzer</h2>
+                <p>Ask about any Indian politician's public likability</p>
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                <!-- Welcome message -->
+                <div class="message assistant">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            <p>👋 <strong>Welcome to Likability Score!</strong></p>
+                            <p>I analyze public perception of Indian politicians using news, social media, and AI-powered sentiment analysis.</p>
+                            <p>Try asking:</p>
+                            <ul>
+                                <li>"How is Narendra Modi doing?"</li>
+                                <li>"Compare Rahul Gandhi and Amit Shah"</li>
+                                <li>"KTR vs Harish Rao vs Revanth Reddy"</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Ask about any politician... (e.g., 'How is Modi doing?')"
+                        onkeypress="handleKeyPress(event)"
+                    >
+                    <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                <p class="input-hint">Press Enter to send • Supports natural language queries</p>
+            </div>
+        </main>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
