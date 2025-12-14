@@ -6,10 +6,11 @@ A beautiful chat interface for analyzing politician likability.
 Features real-time streaming responses.
 """
 
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, redirect, url_for
 from flask_cors import CORS
 import json
 import time
+import os
 from datetime import datetime
 from openai import OpenAI
 
@@ -25,6 +26,29 @@ from analyzer.scoring import likability_scorer
 
 app = Flask(__name__)
 CORS(app)
+
+# Force HTTPS in production
+@app.before_request
+def force_https():
+    """Force HTTPS redirect in production."""
+    if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('FLASK_ENV') == 'production':
+        if request.headers.get('X-Forwarded-Proto') == 'http':
+            url = request.url.replace('http://', 'https://', 1)
+            return redirect(url, code=301)
+
+# Security headers for HTTPS
+@app.after_request
+def after_request(response):
+    """Add security headers."""
+    # Force HTTPS
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    # Prevent mixed content
+    response.headers['Content-Security-Policy'] = "upgrade-insecure-requests"
+    # Security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    return response
 
 # Initialize OpenAI client
 client = None
@@ -510,5 +534,8 @@ if __name__ == '__main__':
     print(f"\n  Starting server at: http://localhost:5000")
     print("="*60 + "\n")
     
-    app.run(debug=True, port=5000)
+    # In production, Railway handles SSL termination
+    # We just need to listen on the port Railway provides
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
