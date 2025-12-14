@@ -23,6 +23,9 @@ class Settings:
     reddit_client_secret: str = os.getenv("REDDIT_CLIENT_SECRET", "")
     reddit_user_agent: str = os.getenv("REDDIT_USER_AGENT", "LikabilityBot/1.0")
     
+    # YouTube
+    youtube_api_key: str = os.getenv("YOUTUBE_API_KEY", "")
+    
     # Cache
     cache_ttl_hours: int = int(os.getenv("CACHE_TTL_HOURS", "24"))
     
@@ -43,6 +46,18 @@ class Settings:
     def has_reddit(self) -> bool:
         """Check if Reddit API is configured."""
         return bool(self.reddit_client_id and self.reddit_client_secret)
+    
+    def has_youtube(self) -> bool:
+        """Check if YouTube API is configured."""
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        has_key = bool(self.youtube_api_key)
+        key_length = len(self.youtube_api_key) if self.youtube_api_key else 0
+        logger.info(f"YouTube API check - Key present: {has_key}, Key length: {key_length}")
+        
+        return has_key
 
 
 # Global settings instance

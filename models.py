@@ -40,6 +40,7 @@ class ScoreBreakdown(BaseModel):
     news_sentiment: float = Field(ge=0, le=100, description="News sentiment score")
     reddit_sentiment: float = Field(ge=0, le=100, description="Reddit sentiment score")
     rss_sentiment: float = Field(ge=0, le=100, description="Google News RSS sentiment")
+    youtube_sentiment: float = Field(ge=0, le=100, description="YouTube comments sentiment")
     engagement: float = Field(ge=0, le=100, description="Overall engagement score")
     trend: float = Field(ge=-100, le=100, description="Trend direction")
 
@@ -65,6 +66,7 @@ class LikabilityResult(BaseModel):
                 "news_sentiment": self.breakdown.news_sentiment,
                 "reddit_sentiment": self.breakdown.reddit_sentiment,
                 "rss_sentiment": self.breakdown.rss_sentiment,
+                "youtube_sentiment": self.breakdown.youtube_sentiment,
                 "engagement": self.breakdown.engagement,
                 "trend": self.breakdown.trend
             },

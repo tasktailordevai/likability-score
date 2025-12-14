@@ -16,17 +16,19 @@ class LikabilityScorer:
     Calculates overall likability score from multiple data sources.
     
     Scoring weights:
-    - News Sentiment: 40%
-    - Reddit Sentiment: 35%
+    - News Sentiment: 30%
+    - Reddit Sentiment: 25%
+    - YouTube Sentiment: 25%
     - Engagement/Reach: 15%
-    - Trend Direction: 10%
+    - Trend Direction: 5%
     """
     
     WEIGHTS = {
-        "news": 0.40,
-        "reddit": 0.35,
+        "news": 0.30,
+        "reddit": 0.25,
+        "youtube": 0.25,
         "engagement": 0.15,
-        "trend": 0.10
+        "trend": 0.05
     }
     
     def calculate(
@@ -35,9 +37,11 @@ class LikabilityScorer:
         news_data: dict,
         rss_data: dict,
         reddit_data: dict,
+        youtube_data: dict,
         news_sentiment: dict,
         rss_sentiment: dict,
-        reddit_sentiment: dict
+        reddit_sentiment: dict,
+        youtube_sentiment: dict
     ) -> LikabilityResult:
         """
         Calculate comprehensive likability score.
@@ -90,24 +94,42 @@ class LikabilityScorer:
             error=reddit_data.get("error") or reddit_sentiment.get("error")
         )
         
+        # YouTube source
+        youtube_videos = youtube_data.get("videos", [])
+        all_youtube_comments = []
+        for video in youtube_videos:
+            all_youtube_comments.extend(video.get("comments", []))
+        
+        sources["youtube"] = SourceData(
+            source_name="YouTube",
+            items_collected=len(youtube_videos),
+            positive_count=youtube_sentiment.get("positive_count", 0),
+            negative_count=youtube_sentiment.get("negative_count", 0),
+            neutral_count=youtube_sentiment.get("neutral_count", 0),
+            sample_items=[v.get("title", "") for v in youtube_videos[:5]],
+            error=youtube_data.get("error") or youtube_sentiment.get("error")
+        )
+        
         # Calculate individual scores
         news_score = self._calculate_sentiment_score(news_sentiment)
         rss_score = self._calculate_sentiment_score(rss_sentiment)
         reddit_score = self._calculate_sentiment_score(reddit_sentiment)
+        youtube_score = self._calculate_sentiment_score(youtube_sentiment)
         
         # Combined news score (NewsAPI + RSS)
         combined_news_score = (news_score + rss_score) / 2 if (news_score > 0 or rss_score > 0) else 50
         
-        # Engagement score (based on Reddit activity)
-        engagement_score = self._calculate_engagement_score(reddit_data)
+        # Engagement score (based on Reddit + YouTube activity)
+        engagement_score = self._calculate_engagement_score(reddit_data, youtube_data)
         
         # Trend score (simplified - would need historical data for real trend)
-        trend_score = self._calculate_trend_score(news_sentiment, reddit_sentiment)
+        trend_score = self._calculate_trend_score(news_sentiment, reddit_sentiment, youtube_sentiment)
         
         # Calculate overall score with weights
         overall_score = (
             combined_news_score * self.WEIGHTS["news"] +
             reddit_score * self.WEIGHTS["reddit"] +
+            youtube_score * self.WEIGHTS["youtube"] +
             engagement_score * self.WEIGHTS["engagement"] +
             ((trend_score + 100) / 2) * self.WEIGHTS["trend"]  # Normalize trend to 0-100
         )
@@ -117,6 +139,7 @@ class LikabilityScorer:
             news_sentiment=round(news_score, 1),
             reddit_sentiment=round(reddit_score, 1),
             rss_sentiment=round(rss_score, 1),
+            youtube_sentiment=round(youtube_score, 1),
             engagement=round(engagement_score, 1),
             trend=round(trend_score, 1)
         )
@@ -156,49 +179,61 @@ class LikabilityScorer:
         raw_score = (pos - neg) / total  # -1 to 1
         return max(0, min(100, (raw_score + 1) * 50))  # 0 to 100
     
-    def _calculate_engagement_score(self, reddit_data: dict) -> float:
+    def _calculate_engagement_score(self, reddit_data: dict, youtube_data: dict) -> float:
         """
-        Calculate engagement score based on Reddit activity.
+        Calculate engagement score based on Reddit and YouTube activity.
         
         Factors:
-        - Number of posts
-        - Average score (upvotes)
+        - Number of posts/videos
+        - Average score (upvotes/views)
         - Comment count
         """
         posts = reddit_data.get("posts", [])
+        videos = youtube_data.get("videos", [])
         
-        if not posts:
+        if not posts and not videos:
             return 50.0  # Neutral default
         
-        # Calculate average metrics
-        total_score = sum(p.get("score", 0) for p in posts)
-        total_comments = sum(p.get("num_comments", 0) for p in posts)
-        avg_upvote_ratio = sum(p.get("upvote_ratio", 0.5) for p in posts) / len(posts)
+        # Reddit metrics
+        reddit_score = 0
+        if posts:
+            total_score = sum(p.get("score", 0) for p in posts)
+            total_comments = sum(p.get("num_comments", 0) for p in posts)
+            avg_upvote_ratio = sum(p.get("upvote_ratio", 0.5) for p in posts) / len(posts)
+            
+            post_score = min(100, len(posts) * 5)
+            upvote_score = min(100, total_score / 10)
+            comment_score = min(100, total_comments / 5)
+            ratio_score = avg_upvote_ratio * 100
+            
+            reddit_score = (post_score * 0.2 + upvote_score * 0.3 + comment_score * 0.2 + ratio_score * 0.3) / 2
         
-        # Normalize to 0-100
-        # More posts = more engagement
-        post_score = min(100, len(posts) * 5)  # Cap at 20 posts for max
+        # YouTube metrics
+        youtube_score = 0
+        if videos:
+            total_views = sum(v.get("views", 0) for v in videos)
+            total_likes = sum(v.get("likes", 0) for v in videos)
+            total_comments = sum(v.get("comments_count", 0) for v in videos)
+            
+            video_score = min(100, len(videos) * 10)
+            views_score = min(100, total_views / 100000)  # 10M views = 100
+            likes_score = min(100, total_likes / 10000)   # 1M likes = 100
+            comments_score = min(100, total_comments / 1000)  # 100K comments = 100
+            
+            youtube_score = (video_score * 0.2 + views_score * 0.3 + likes_score * 0.2 + comments_score * 0.3) / 2
         
-        # Higher upvotes = more positive engagement
-        upvote_score = min(100, total_score / 10)  # Cap at 1000 total upvotes
+        # Combine Reddit and YouTube
+        if posts and videos:
+            engagement = (reddit_score + youtube_score) / 2
+        elif posts:
+            engagement = reddit_score
+        else:
+            engagement = youtube_score
         
-        # More comments = more discussion
-        comment_score = min(100, total_comments / 5)  # Cap at 500 comments
-        
-        # Upvote ratio indicates sentiment
-        ratio_score = avg_upvote_ratio * 100
-        
-        # Weighted combination
-        engagement = (
-            post_score * 0.2 +
-            upvote_score * 0.3 +
-            comment_score * 0.2 +
-            ratio_score * 0.3
-        )
         
         return max(0, min(100, engagement))
     
-    def _calculate_trend_score(self, news_sentiment: dict, reddit_sentiment: dict) -> float:
+    def _calculate_trend_score(self, news_sentiment: dict, reddit_sentiment: dict, youtube_sentiment: dict) -> float:
         """
         Calculate trend score (-100 to +100).
         
@@ -208,21 +243,24 @@ class LikabilityScorer:
         Note: For accurate trends, we'd need historical data.
         This is a simplified version based on current data quality.
         """
-        # For now, use confidence and overall sentiment as proxy
+        # Use confidence and overall sentiment as proxy
         news_confidence = news_sentiment.get("confidence", 50)
         reddit_confidence = reddit_sentiment.get("confidence", 50)
+        youtube_confidence = youtube_sentiment.get("confidence", 50)
         
         news_overall = news_sentiment.get("overall_sentiment", "neutral")
         reddit_overall = reddit_sentiment.get("overall_sentiment", "neutral")
+        youtube_overall = youtube_sentiment.get("overall_sentiment", "neutral")
         
         # Convert to score
         sentiment_map = {"positive": 1, "neutral": 0, "negative": -1}
         news_direction = sentiment_map.get(news_overall, 0)
         reddit_direction = sentiment_map.get(reddit_overall, 0)
+        youtube_direction = sentiment_map.get(youtube_overall, 0)
         
         # Combined trend based on agreement and confidence
-        avg_confidence = (news_confidence + reddit_confidence) / 2
-        avg_direction = (news_direction + reddit_direction) / 2
+        avg_confidence = (news_confidence + reddit_confidence + youtube_confidence) / 3
+        avg_direction = (news_direction + reddit_direction + youtube_direction) / 3
         
         # Scale to -100 to 100
         return avg_direction * avg_confidence

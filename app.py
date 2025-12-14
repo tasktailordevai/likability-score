@@ -20,12 +20,47 @@ from models import LikabilityResult
 from fetchers.newsapi import newsapi_fetcher
 from fetchers.rss import rss_fetcher
 from fetchers.reddit import reddit_fetcher
+from fetchers.youtube import youtube_fetcher
 from analyzer.sentiment import sentiment_analyzer
 from analyzer.scoring import likability_scorer
 
 
 app = Flask(__name__)
 CORS(app)
+
+# Ensure correct MIME types for static files
+import mimetypes
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('text/css', '.css')
+
+# Custom static file serving with correct MIME types
+from flask import send_from_directory
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files with correct MIME types."""
+    mime_types = {
+        '.js': 'application/javascript',
+        '.css': 'text/css',
+        '.html': 'text/html',
+        '.json': 'application/json',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.ico': 'image/x-icon'
+    }
+    
+    ext = os.path.splitext(filename)[1].lower()
+    mimetype = mime_types.get(ext, 'application/octet-stream')
+    
+    return send_from_directory('static', filename, mimetype=mimetype)
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon (or return empty response if not found)."""
+    try:
+        return send_from_directory('static', 'favicon.ico', mimetype='image/x-icon')
+    except:
+        return '', 204  # No content
 
 # Force HTTPS in production
 @app.before_request
@@ -74,6 +109,7 @@ def analyze_politician(name: str, force_refresh: bool = False) -> LikabilityResu
     news_data = newsapi_fetcher.fetch(name)
     rss_data = rss_fetcher.fetch_multiple_languages(name)
     reddit_data = reddit_fetcher.fetch(name)
+    youtube_data = youtube_fetcher.get_comprehensive_data(name, max_videos=5, max_comments_per_video=50)
     
     # Extract texts
     news_texts = [f"{a.get('title', '')}. {a.get('description', '')}" 
@@ -82,10 +118,21 @@ def analyze_politician(name: str, force_refresh: bool = False) -> LikabilityResu
     reddit_texts = [f"{p.get('title', '')}. {p.get('text', '')}" 
                    for p in reddit_data.get("posts", [])]
     
+    # Extract YouTube texts (comments + transcripts)
+    youtube_texts = []
+    for video in youtube_data.get("videos", []):
+        # Add transcript if available
+        if video.get("transcript"):
+            youtube_texts.append(video["transcript"][:1000])  # Limit transcript length
+        # Add comments
+        for comment in video.get("comments", []):
+            youtube_texts.append(comment.get("text", ""))
+    
     # Analyze sentiment
     news_sentiment = sentiment_analyzer.analyze_batch(news_texts, name, "news")
     rss_sentiment = sentiment_analyzer.analyze_batch(rss_texts, name, "news")
     reddit_sentiment = sentiment_analyzer.analyze_batch(reddit_texts, name, "reddit")
+    youtube_sentiment = sentiment_analyzer.analyze_batch(youtube_texts, name, "youtube")
     
     # Add metrics
     news_sentiment["engagement_score"] = 65
@@ -99,9 +146,11 @@ def analyze_politician(name: str, force_refresh: bool = False) -> LikabilityResu
         news_data=news_data,
         rss_data=rss_data,
         reddit_data=reddit_data,
+        youtube_data=youtube_data,
         news_sentiment=news_sentiment,
         rss_sentiment=rss_sentiment,
-        reddit_sentiment=reddit_sentiment
+        reddit_sentiment=reddit_sentiment,
+        youtube_sentiment=youtube_sentiment
     )
     
     # Cache result
@@ -112,6 +161,24 @@ def analyze_politician(name: str, force_refresh: bool = False) -> LikabilityResu
 
 def format_result_for_llm(result: LikabilityResult) -> str:
     """Format result as text for LLM context."""
+    # Build platform summaries
+    platform_summaries = []
+    
+    for source_name, source_data in result.sources.items():
+        if source_data.items_collected > 0:
+            pos = source_data.positive_count
+            neg = source_data.negative_count
+            neu = source_data.neutral_count
+            total = pos + neg + neu
+            
+            if total > 0:
+                pos_pct = (pos / total) * 100
+                neg_pct = (neg / total) * 100
+                summary = f"{source_data.source_name}: {source_data.items_collected} items analyzed - {pos_pct:.0f}% positive, {neg_pct:.0f}% negative, {source_data.sentiment_score:.0f}/100 sentiment score"
+                platform_summaries.append(summary)
+    
+    platforms_text = "\n".join(f"- {s}" for s in platform_summaries) if platform_summaries else "No platform data available"
+    
     return f"""
 Politician: {result.name}
 Overall Likability Score: {result.score}/100
@@ -120,8 +187,12 @@ Score Breakdown:
 - News Sentiment: {result.breakdown.news_sentiment}/100
 - RSS/Trending News: {result.breakdown.rss_sentiment}/100  
 - Reddit Sentiment: {result.breakdown.reddit_sentiment}/100
+- YouTube Sentiment: {result.breakdown.youtube_sentiment}/100
 - Engagement: {result.breakdown.engagement}/100
 - Trend Direction: {result.breakdown.trend:+.1f}
+
+Platform Summaries:
+{platforms_text}
 
 Strengths: {', '.join(result.insights) if result.insights else 'None identified'}
 Weaknesses: {', '.join(result.weaknesses) if result.weaknesses else 'None identified'}
@@ -189,11 +260,12 @@ User's question: {user_message}
 
 Provide a natural, conversational response that:
 1. Summarizes key findings with actual numbers
-2. Compares if multiple politicians
-3. Highlights insights
-4. Is friendly and helpful
+2. Includes a brief summary from each platform (NewsAPI, Google News RSS, Reddit, YouTube) showing what was found and analyzed
+3. Compares if multiple politicians
+4. Highlights insights
+5. Is friendly and helpful
 
-Keep it concise (2-3 paragraphs)."""
+Keep it concise (3-4 paragraphs). Make sure to mention each platform's contribution to the analysis."""
 
     try:
         response = client.chat.completions.create(
@@ -224,12 +296,24 @@ def index():
 @app.route('/api/config')
 def get_config():
     """Return API configuration status."""
-    return jsonify({
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    config = {
         "openai": bool(settings.openai_api_key),
         "newsapi": settings.has_newsapi(),
         "reddit": settings.has_reddit(),
+        "youtube": settings.has_youtube(),
         "rss": True
-    })
+    }
+    
+    # Log the config
+    logger.info(f"Config endpoint called. YouTube API key present: {bool(settings.youtube_api_key)}")
+    logger.info(f"Config response: {config}")
+    logger.info(f"YouTube has_youtube() result: {settings.has_youtube()}")
+    
+    return jsonify(config)
 
 
 @app.route('/api/chat', methods=['POST'])
@@ -270,6 +354,7 @@ def chat():
                         "news": result.breakdown.news_sentiment,
                         "rss": result.breakdown.rss_sentiment,
                         "reddit": result.breakdown.reddit_sentiment,
+                        "youtube": result.breakdown.youtube_sentiment,
                         "engagement": result.breakdown.engagement,
                         "trend": result.breakdown.trend
                     },
@@ -381,6 +466,9 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'status', 'message': f'Fetching social discussions for {name}...'})}\n\n"
                     reddit_data = reddit_fetcher.fetch(name)
                     
+                    yield f"data: {json.dumps({'type': 'status', 'message': f'Fetching YouTube videos for {name}...'})}\n\n"
+                    youtube_data = youtube_fetcher.get_comprehensive_data(name, max_videos=5, max_comments_per_video=50)
+                    
                     # Extract texts
                     news_texts = [f"{a.get('title', '')}. {a.get('description', '')}" 
                                   for a in news_data.get("articles", [])]
@@ -388,13 +476,22 @@ def chat_stream():
                     reddit_texts = [f"{p.get('title', '')}. {p.get('text', '')}" 
                                    for p in reddit_data.get("posts", [])]
                     
-                    total_items = len(news_texts) + len(rss_texts) + len(reddit_texts)
+                    # Extract YouTube texts (comments + transcripts)
+                    youtube_texts = []
+                    for video in youtube_data.get("videos", []):
+                        if video.get("transcript"):
+                            youtube_texts.append(video["transcript"][:1000])
+                        for comment in video.get("comments", []):
+                            youtube_texts.append(comment.get("text", ""))
+                    
+                    total_items = len(news_texts) + len(rss_texts) + len(reddit_texts) + len(youtube_texts)
                     yield f"data: {json.dumps({'type': 'status', 'message': f'Analyzing {total_items} items with AI...'})}\n\n"
                     
                     # Analyze sentiment
                     news_sentiment = sentiment_analyzer.analyze_batch(news_texts, name, "news")
                     rss_sentiment = sentiment_analyzer.analyze_batch(rss_texts, name, "news")
                     reddit_sentiment = sentiment_analyzer.analyze_batch(reddit_texts, name, "reddit")
+                    youtube_sentiment = sentiment_analyzer.analyze_batch(youtube_texts, name, "youtube")
                     
                     # Add metrics
                     news_sentiment["engagement_score"] = 65
@@ -410,9 +507,11 @@ def chat_stream():
                         news_data=news_data,
                         rss_data=rss_data,
                         reddit_data=reddit_data,
+                        youtube_data=youtube_data,
                         news_sentiment=news_sentiment,
                         rss_sentiment=rss_sentiment,
-                        reddit_sentiment=reddit_sentiment
+                        reddit_sentiment=reddit_sentiment,
+                        youtube_sentiment=youtube_sentiment
                     )
                     
                     # Cache result
@@ -428,6 +527,7 @@ def chat_stream():
                         "news": result.breakdown.news_sentiment,
                         "rss": result.breakdown.rss_sentiment,
                         "reddit": result.breakdown.reddit_sentiment,
+                        "youtube": result.breakdown.youtube_sentiment,
                         "engagement": result.breakdown.engagement,
                         "trend": result.breakdown.trend
                     },
@@ -451,7 +551,13 @@ Analysis Data:
 
 User's question: {user_message}
 
-Provide a natural, conversational response that summarizes key findings with numbers, compares if multiple politicians, and highlights insights. Keep it concise (2-3 paragraphs)."""
+Provide a natural, conversational response that:
+1. Summarizes key findings with actual numbers
+2. Includes a brief summary from each platform (NewsAPI, Google News RSS, Reddit, YouTube) showing what was found
+3. Compares if multiple politicians
+4. Highlights insights
+
+Keep it concise (3-4 paragraphs). Make sure to mention each platform's contribution."""
 
                 try:
                     # Use streaming from OpenAI
@@ -524,12 +630,27 @@ I'll gather data from news sources and social media, then give you a likability 
 
 
 if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    
     print("\n" + "="*60)
     print("  LIKABILITY SCORE - Web Application")
     print("="*60)
+    
+    # Log each API status
+    logger.info("Checking API configurations...")
+    logger.info(f"OpenAI API key present: {bool(settings.openai_api_key)}")
+    logger.info(f"NewsAPI key present: {bool(settings.newsapi_key)}")
+    logger.info(f"Reddit configured: {settings.has_reddit()}")
+    logger.info(f"YouTube API key present: {bool(settings.youtube_api_key)}")
+    logger.info(f"YouTube key length: {len(settings.youtube_api_key) if settings.youtube_api_key else 0}")
+    logger.info(f"YouTube has_youtube(): {settings.has_youtube()}")
+    
     print(f"\n  OpenAI API:  {'[OK]' if settings.openai_api_key else '[--]'}")
     print(f"  NewsAPI:     {'[OK]' if settings.has_newsapi() else '[--]'}")
     print(f"  Reddit API:  {'[OK]' if settings.has_reddit() else '[--]'}")
+    print(f"  YouTube API: {'[OK]' if settings.has_youtube() else '[--]'}")
     print(f"  Google RSS:  [OK] Always available")
     print(f"\n  Starting server at: http://localhost:5000")
     print("="*60 + "\n")
@@ -537,5 +658,5 @@ if __name__ == '__main__':
     # In production, Railway handles SSL termination
     # We just need to listen on the port Railway provides
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)  # Enable debug for more logging
 

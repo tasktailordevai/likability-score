@@ -14,30 +14,52 @@ const sessionId = 'session_' + Date.now();
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded, checking API status...');
     checkApiStatus();
-    messageInput.focus();
+    if (messageInput) messageInput.focus();
 });
 
 async function checkApiStatus() {
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
+        console.log('Config:', config);
         
-        updateStatus('status-openai', config.openai);
-        updateStatus('status-newsapi', config.newsapi);
-        updateStatus('status-reddit', config.reddit);
-        updateStatus('status-rss', config.rss);
+        // Simple and direct updates
+        setStatus('status-openai', config.openai);
+        setStatus('status-newsapi', config.newsapi);
+        setStatus('status-reddit', config.reddit);
+        setStatus('status-rss', config.rss);
+        setStatus('status-youtube', config.youtube);
+        
     } catch (error) {
         console.error('Failed to check API status:', error);
     }
 }
 
-function updateStatus(elementId, isActive) {
-    const element = document.getElementById(elementId);
-    if (element) {
-        element.classList.toggle('active', isActive);
-        element.classList.toggle('inactive', !isActive);
+function setStatus(id, isActive) {
+    const el = document.getElementById(id);
+    if (!el) {
+        console.error('Element not found:', id);
+        return;
     }
+    
+    // Clear both classes first
+    el.className = 'status-item';
+    
+    // Add the appropriate class
+    if (isActive) {
+        el.className = 'status-item active';
+    } else {
+        el.className = 'status-item inactive';
+    }
+    
+    console.log(`${id}: ${isActive ? 'ACTIVE' : 'inactive'} -> ${el.className}`);
+}
+
+// Keep the old function name for the refresh button
+function updateStatus(elementId, isActive) {
+    setStatus(elementId, isActive);
 }
 
 // ============================================
@@ -251,14 +273,18 @@ function addScoreCard(messageEl, politician) {
                 <span>Trending</span>
                 <span>${(breakdown.rss || 50).toFixed(0)}</span>
             </div>
-            <div class="breakdown-item">
-                <span>Social</span>
-                <span>${(breakdown.reddit || 50).toFixed(0)}</span>
-            </div>
-            <div class="breakdown-item">
-                <span>Engagement</span>
-                <span>${(breakdown.engagement || 50).toFixed(0)}</span>
-            </div>
+                <div class="breakdown-item">
+                    <span>Social</span>
+                    <span>${(breakdown.reddit || 50).toFixed(0)}</span>
+                </div>
+                <div class="breakdown-item">
+                    <span>YouTube</span>
+                    <span>${(breakdown.youtube || 50).toFixed(0)}</span>
+                </div>
+                <div class="breakdown-item">
+                    <span>Engagement</span>
+                    <span>${(breakdown.engagement || 50).toFixed(0)}</span>
+                </div>
         </div>
         ${politician.cached ? '<p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">📦 Cached</p>' : ''}
     `;

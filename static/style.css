@@ -134,15 +134,33 @@ body::before {
     height: 8px;
     border-radius: 50%;
     background: var(--text-muted);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
+/* Active state - green dot */
 .status-item.active .status-dot {
-    background: var(--success);
-    box-shadow: 0 0 8px var(--success);
+    background: var(--success) !important;
+    box-shadow: 0 0 8px var(--success) !important;
 }
 
+/* Inactive state - gray dot */
 .status-item.inactive .status-dot {
-    background: var(--text-muted);
+    background: var(--text-muted) !important;
+    box-shadow: none !important;
+}
+
+/* Default state (if no class) - also gray */
+.status-item:not(.active):not(.inactive) .status-dot {
+    background: var(--text-muted) !important;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
 }
 
 /* Quick Actions */
